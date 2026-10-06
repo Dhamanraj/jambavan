@@ -1,0 +1,81 @@
+{
+  "name": "self-evolving-agent",
+  "displayName": "Self-Evolving Private Coding Agent",
+  "description": "A local-first coding agent with a private Ollama chat view in VS Code.",
+  "version": "0.1.0",
+  "publisher": "self-evolving-agent",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:selfEvolvingAgent.ask",
+    "onCommand:selfEvolvingAgent.proposeEdit",
+    "onCommand:selfEvolvingAgent.applyProposal",
+    "onCommand:selfEvolvingAgent.discardProposal",
+    "onView:selfEvolvingAgent.chat"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "selfEvolvingAgent",
+          "title": "Private Agent",
+          "icon": "resources/chat.svg"
+        }
+      ]
+    },
+    "views": {
+      "selfEvolvingAgent": [
+        {
+          "type": "webview",
+          "id": "selfEvolvingAgent.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "selfEvolvingAgent.ask",
+        "title": "Ask Local Coding Agent"
+      },
+      {
+        "command": "selfEvolvingAgent.proposeEdit",
+        "title": "Propose Edit to Active File"
+      },
+      {
+        "command": "selfEvolvingAgent.applyProposal",
+        "title": "Apply Last Agent Proposal"
+      },
+      {
+        "command": "selfEvolvingAgent.discardProposal",
+        "title": "Discard Last Agent Proposal"
+      }
+    ],
+    "configuration": {
+      "title": "Self-Evolving Agent",
+      "properties": {
+        "selfEvolvingAgent.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL for the local Ollama server."
+        },
+        "selfEvolvingAgent.model": {
+          "type": "string",
+          "default": "qwen3.5:9b",
+          "description": "Ollama model tag to use. Change this to match `ollama list`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.0"
+  }
+}
