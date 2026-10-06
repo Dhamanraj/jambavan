@@ -1,6 +1,6 @@
 # Jambavan — Self-Evolving Private Coding Agent
 
-Jambavan is a coding assistant designed to adapt to the coding style and repositories a developer works with. This early local-first prototype adds a private VS Code chat view connected directly to Ollama.
+Jambavan is a coding assistant designed to adapt to the coding style and repositories a developer works with, and help them code. This early local-first prototype adds a private VS Code chat view connected directly to Ollama.
 
 ## Run the extension in VS Code
 
