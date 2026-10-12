@@ -1,50 +1,61 @@
-# Jambavan — Self-Evolving Private Coding Agent
+# Jambavan
 
-Jambavan is a coding assistant designed to adapt to the coding style and repositories a developer works with, and help them code. This early local-first prototype adds a private VS Code chat view connected directly to Ollama.
+### Learning to build a private coding assistant, one feature at a time
 
-## Run the extension in VS Code
+I’m building Jambavan to learn how AI coding tools work from the inside. It is an experimental VS Code extension that connects to a local Ollama model, reads bounded context from the repository I have open, and keeps repository notes that can help with later questions.
 
-1. Open this project folder in VS Code.
-2. Open VS Code's terminal using **Terminal → New Terminal**.
-3. Run `npm install` once to install the project tools.
-4. Press `F5`. VS Code compiles the extension and opens a second window called **Extension Development Host**.
-5. In that second window, click the **Private Agent** speech-bubble icon in the Activity Bar.
-6. Type a question in the chat box and press `Enter`. Use `Shift+Enter` for a new line.
-7. To request a code change in chat, open the target file and send `/edit` followed by the requested change, for example `/edit add input validation`.
-8. Review the side-by-side diff. The original file stays unchanged until you choose **Apply proposal** in chat; **Discard** closes out the proposal. Applying updates the editor buffer but does not save it, so press `Cmd+S` when ready.
-9. Use **Add context files** above the chat to choose up to two repository files for the agent to reference. The selection is shown in the conversation and stays selected for this workspace until you clear it with **Clear context**.
-10. Jambavan automatically updates its repository notes after supported files change, and does a check when VS Code starts. You can also type `/scan` or run **Scan Repository and Update Jambavan Notes** to refresh them manually.
-11. You can also run **Propose Edit to Active File** from the Command Palette.
+This repository is part working prototype and part learning journal. I’m documenting what I add, what I learn, and where the current design still has limits. Jambavan is not a trained or autonomous coding system: its “learning” currently means saving repository summaries, chat history, and feedback as local data.
 
-Chat history is saved locally for this workspace, so recent conversations remain available after VS Code restarts.
+**Source code:** [github.com/Dhamanraj/jambavan](https://github.com/Dhamanraj/jambavan)
 
-Ollama must be running and have the selected model downloaded. In VS Code settings, set **Self-Evolving Agent: Model** to the exact tag shown by `ollama list`. The default is `qwen3.5:9b`, matching the installed Qwen 3.5 9B model. The server URL defaults to `http://localhost:11434`.
+## What it can do today
 
-## What this first slice teaches
+- Chat with an Ollama model from a VS Code Activity Bar view. The default model is `qwen3.5:9b`.
+- Include a limited amount of workspace context, selected files, and generated repository notes in a request. Each assistant response shows the context items sent to the model.
+- Scan supported repository files and write a readable `JAMBAVAN_NOTES.md` plus a hidden `.jambavan/scan-index.json`. Hashes let it skip unchanged files.
+- Update notes after supported file changes and when VS Code starts. If a GitHub PR is merged, Jambavan sees those changes after they are pulled or checked out locally; it does not connect to GitHub directly.
+- Save recent chat history and feedback in VS Code extension storage for the workspace. Mark a response **Helpful**, **Not helpful**, or **Remember** to give future relevant answers more user-specific context.
+- Propose an edit to the active file and show a diff for review. Applying a proposal changes the editor buffer; I still need to review and save it.
 
-- A Webview View provides a chat layout in the VS Code Activity Bar. It sends and receives messages through VS Code's extension messaging API.
-- VS Code's workspace APIs let the extension discover file paths and read project guidance.
-- Ollama exposes a local HTTP chat endpoint, so the extension can use the installed model without a cloud API.
-- For questions, the extension sends up to 50 file paths per workspace, up to 2,500 characters of project guidance/metadata per workspace, and up to 6,000 characters from the active file.
-- For chat messages, it sends up to 15 file paths, up to 800 characters of project instructions, up to 1,800 characters from the active file, and up to two recent messages capped at 500 characters each.
-- Chat can also include excerpts of up to 900 characters each from two files you explicitly select. Those selections are stored for this VS Code workspace and can be cleared in the chat.
-- Repository scans create a readable `JAMBAVAN_NOTES.md` plus a hidden `.jambavan/scan-index.json` containing file hashes and summaries. Unchanged files are skipped. Scans process changed files in batches of 20 and include supported source, configuration, and Markdown files under 100 KB, with each file excerpt capped at 6,000 characters. Summaries stream from Ollama and are saved after each file, so a later failure does not discard completed summaries.
-- Automatic scans wait briefly for a group of file changes to settle before updating notes. A pull or local merge is detected from its changed working-tree files. A PR merged on GitHub is detected after you pull or check out those changes locally; Jambavan does not watch GitHub directly.
-- Automatic scanning can be disabled with **Self-Evolving Agent: Auto Scan Repository** in VS Code settings. Manual `/scan` remains available.
-- Chat and edit requests include a bounded excerpt of the generated repository notes. The notes are generated by the local model and should be checked against the source before relying on them.
-- For edit proposals, it sends the active file, up to 1,200 characters of `AGENTS.md` or `Instructions.md` guidance, and up to 800 characters of relevant repository notes. Files over 7,000 characters are currently refused so the model can return the complete file within its context window.
-- Common environment, key, certificate, and secret-named files are filtered out by filename. This is a basic precaution, not a complete secret scanner.
-- The extension does not send every source file or run tests yet. Edit proposals appear in an untitled preview and require an explicit apply action before the editor buffer changes.
-- The `/edit` chat action uses the same full-file proposal format and size limit as the Command Palette edit action.
-- Chat history is saved locally in VS Code extension storage, separately for each open workspace. The latest 40 messages are kept and are not written into the repository. Chat context is sent to the Ollama URL configured in VS Code settings.
-- Assistant replies show a collapsible list of the workspace files and notes included in the model request. This is the context Jambavan received; it does not guarantee that every listed item influenced the answer.
-- Use **Helpful**, **Not helpful**, or **Remember** under a reply to save your feedback or keep that recommendation as a local preference for future relevant questions. These saved choices are supplied to Ollama as preferences, not as commands.
+## Follow the build
 
-The request is sent to the configured Ollama URL, which defaults to the local machine. Check that setting before use. The scanner filters sensitive-looking filenames and redacts several common token/password formats, but this is not a complete secret detector. Avoid storing secrets in source files or prompts.
+- [Learning journal](docs/learning-journal.md): the milestones, lessons, debugging discoveries, and next steps.
+- [How Jambavan works](docs/architecture.md): a tour of the extension, repository scan, local memory, and edit review flow.
 
-## Planned learning path
+## Run the development version
 
-1. Connect VS Code to Ollama and provide bounded workspace context.
-2. Add explicit repository context selection and explain how files are chosen.
-3. Add user-approved test commands and feed their output back to the model.
-4. Save and inspect project-specific memory in the workspace.
+You need VS Code, Node.js with npm, Ollama, and a model downloaded in Ollama. By default, Jambavan expects `qwen3.5:9b` and an Ollama server at `http://localhost:11434`. You can change these in VS Code settings.
+
+1. Clone this repository and open its folder in VS Code.
+2. Open **Terminal → New Terminal** and run `npm install`.
+3. Make sure Ollama is running and the configured model is available. For example, run `ollama list` in a terminal to check installed models.
+4. Press **F5**. VS Code compiles the extension and opens a second window called **Extension Development Host**.
+5. In that second window, select the **Private Agent** speech-bubble icon in the Activity Bar.
+6. Ask a question. Use `/scan` to update repository notes, or `/edit` followed by a requested change to propose an edit to the active file.
+
+F5 is the development workflow: it opens a temporary test window. The project is not yet packaged as a regular VS Code installation, so this is how I currently try changes while building it.
+
+## What happens when I ask a question
+
+Jambavan gathers a limited set of workspace paths, project instructions, the active file excerpt, optional files I selected, repository notes, and a small amount of recent conversation. It sends that context and my question to the Ollama URL in settings. It then shows the model's response and the context items supplied with the request.
+
+For a scan, Jambavan finds supported text files, skips ignored folders and likely sensitive files, checks file hashes, and asks Ollama to summarize changed files. It streams each summary and saves it to the index as it completes. The readable notes are regenerated from that index.
+
+For `/edit`, Jambavan asks the model for a complete replacement of the active file and opens a side-by-side diff. The original is unchanged until I choose **Apply proposal**. I review the result and save it myself.
+
+## Privacy and current limits
+
+The default Ollama URL points to the local machine, but the extension uses whatever URL is configured in VS Code settings. Chat context is sent to that endpoint. Chat history and remembered choices are saved locally in VS Code extension storage, not in the repository. Repository notes are saved in the repository itself.
+
+Jambavan filters some sensitive-looking filenames and redacts several common secret formats during scanning. This is a basic precaution, not a complete secret detector. I should review what is included in the context list and avoid putting secrets in prompts or source files.
+
+This is an early prototype. It does not run tests, execute shell commands, monitor GitHub, or fine-tune the model. A repository summary is a navigation aid, not verified truth; check the source before relying on a recommendation.
+
+## Current learning goals
+
+1. Improve how Jambavan finds the most relevant files and notes for a question.
+2. Make saved memory easier to inspect, edit, and clear.
+3. Add a user-approved test workflow and teach Jambavan how to explain the results.
+4. Explore Git-aware change summaries after changes reach the local checkout.
+
+I’ll keep this README and the learning journal updated as the project changes. Suggestions and questions are welcome through GitHub Issues or Discussions.
