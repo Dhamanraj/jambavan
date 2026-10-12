@@ -10,10 +10,12 @@
   "categories": ["Other"],
   "activationEvents": [
     "onCommand:selfEvolvingAgent.ask",
+    "onCommand:selfEvolvingAgent.scanRepository",
     "onCommand:selfEvolvingAgent.proposeEdit",
     "onCommand:selfEvolvingAgent.applyProposal",
     "onCommand:selfEvolvingAgent.discardProposal",
-    "onView:selfEvolvingAgent.chat"
+    "onView:selfEvolvingAgent.chat",
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -41,6 +43,10 @@
         "title": "Ask Local Coding Agent"
       },
       {
+        "command": "selfEvolvingAgent.scanRepository",
+        "title": "Scan Repository and Update Jambavan Notes"
+      },
+      {
         "command": "selfEvolvingAgent.proposeEdit",
         "title": "Propose Edit to Active File"
       },
@@ -65,6 +71,11 @@
           "type": "string",
           "default": "qwen3.5:9b",
           "description": "Ollama model tag to use. Change this to match `ollama list`."
+        },
+        "selfEvolvingAgent.autoScanRepository": {
+          "type": "boolean",
+          "default": true,
+          "description": "Update local Jambavan notes after supported repository files change and when VS Code starts."
         }
       }
     }

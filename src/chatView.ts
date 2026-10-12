@@ -3,17 +3,28 @@ import * as vscode from "vscode";
 export type AgentChatMessage = {
   role: "user" | "assistant";
   content: string;
+  references?: string[];
   proposalActions?: boolean;
+  memoryChoice?: "helpful" | "notHelpful" | "remembered";
 };
 
-export type AgentChatReply = { text: string; proposalActions?: boolean };
+export type AgentChatReply = { text: string; references?: string[]; proposalActions?: boolean };
 export type AgentChatHandler = (messages: AgentChatMessage[]) => Promise<AgentChatReply>;
 export type AgentChatActionHandler = (action: "apply" | "discard") => Promise<void>;
+export type AgentChatContextHandler = (
+  action: "select" | "clear",
+) => Promise<{ paths: string[]; cancelled: boolean }>;
+export type AgentMemoryActionHandler = (action: "helpful" | "notHelpful" | "remember", message: AgentChatMessage) => Promise<void>;
+export type AgentChatLoadHandler = () => Promise<AgentChatMessage[]>;
+export type AgentChatSaveHandler = (messages: AgentChatMessage[]) => Promise<void>;
 
 type WebviewMessage = {
   type?: string;
   text?: string;
   action?: "apply" | "discard";
+  memoryAction?: "helpful" | "notHelpful" | "remember";
+  messageIndex?: number;
+  contextAction?: "select" | "clear";
 };
 
 export class AgentChatViewProvider implements vscode.WebviewViewProvider {
@@ -24,7 +35,20 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly handleChat: AgentChatHandler,
     private readonly handleProposalAction: AgentChatActionHandler,
+    private readonly handleContextAction: AgentChatContextHandler,
+    private readonly loadMessages: AgentChatLoadHandler,
+    private readonly saveMessages: AgentChatSaveHandler,
+    private readonly handleMemoryAction: AgentMemoryActionHandler,
   ) {}
+
+  private async persistMessages(): Promise<void> {
+    try {
+      await this.saveMessages(this.messages);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      void vscode.window.showWarningMessage(`Jambavan could not save local chat history: ${detail}`);
+    }
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -40,7 +64,23 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
 
   private async onMessage(message: WebviewMessage): Promise<void> {
     if (message.type === "ready") {
+      this.messages = await this.loadMessages();
       await this.view?.webview.postMessage({ type: "history", messages: this.messages });
+      return;
+    }
+
+    if (message.type === "memoryAction" && message.memoryAction && Number.isInteger(message.messageIndex)) {
+      const target = this.messages[message.messageIndex!];
+      if (!target || target.role !== "assistant") return;
+      try {
+        await this.handleMemoryAction(message.memoryAction, target);
+        target.memoryChoice = message.memoryAction === "remember" ? "remembered" : message.memoryAction;
+        await this.persistMessages();
+        await this.view?.webview.postMessage({ type: "memoryActionDone", messageIndex: message.messageIndex, action: message.memoryAction });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        await this.view?.webview.postMessage({ type: "error", text: `Could not save this choice locally: ${detail}` });
+      }
       return;
     }
 
@@ -56,6 +96,25 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    if (message.type === "contextAction" && message.contextAction) {
+      try {
+        const result = await this.handleContextAction(message.contextAction);
+        if (!result.cancelled) {
+          const text = result.paths.length > 0
+            ? `Chat context files selected:\n${result.paths.map((path) => `• ${path}`).join("\n")}`
+            : "No extra context files are selected. Chat will use the active file and basic workspace overview.";
+          this.messages.push({ role: "assistant", content: text });
+          this.messages = this.messages.slice(-40);
+          await this.persistMessages();
+          await this.view?.webview.postMessage({ type: "contextUpdated", text });
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        await this.view?.webview.postMessage({ type: "error", text: `Could not update repository context: ${detail}` });
+      }
+      return;
+    }
+
     const text = message.type === "send" ? message.text?.trim() : undefined;
     if (!text || this.busy || text.length > 2_000) {
       return;
@@ -63,18 +122,22 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
 
     this.busy = true;
     this.messages.push({ role: "user", content: text });
+    this.messages = this.messages.slice(-40);
+    await this.persistMessages();
     await this.view?.webview.postMessage({ type: "busy", value: true });
 
     try {
       const reply = await this.handleChat(this.messages.slice(-5));
-      this.messages.push({ role: "assistant", content: reply.text, proposalActions: reply.proposalActions });
-      this.messages = this.messages.slice(-10);
-      await this.view?.webview.postMessage({ type: "assistant", text: reply.text, proposalActions: reply.proposalActions });
+      this.messages.push({ role: "assistant", content: reply.text, references: reply.references, proposalActions: reply.proposalActions });
+      this.messages = this.messages.slice(-40);
+      await this.persistMessages();
+      await this.view?.webview.postMessage({ type: "assistant", text: reply.text, references: reply.references, proposalActions: reply.proposalActions, messageIndex: this.messages.length - 1 });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const explanation = `I couldn't complete that request: ${detail}`;
       this.messages.push({ role: "assistant", content: explanation });
-      this.messages = this.messages.slice(-10);
+      this.messages = this.messages.slice(-40);
+      await this.persistMessages();
       await this.view?.webview.postMessage({ type: "error", text: explanation });
     } finally {
       this.busy = false;
@@ -108,6 +171,8 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
     header { padding: 14px 14px 10px; border-bottom: 1px solid var(--vscode-panel-border); }
     header h1 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
     header p { margin: 0; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .context-controls { display: flex; gap: 6px; padding-top: 9px; }
+    .context-controls button { padding: 3px 8px; font-size: 11px; }
     #messages { flex: 1; overflow-y: auto; padding: 14px 10px; }
     .welcome { color: var(--vscode-descriptionForeground); line-height: 1.5; padding: 8px 4px; }
     .message { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; padding: 9px 10px; margin: 0 0 10px; border-radius: 6px; }
@@ -137,9 +202,13 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
     <header>
       <h1>Self-Evolving Agent</h1>
       <p>Private chat powered by your local Ollama model</p>
+      <div class="context-controls">
+        <button id="select-context" type="button">Add context files</button>
+        <button id="clear-context" type="button">Clear context</button>
+      </div>
     </header>
     <section id="messages" aria-live="polite" aria-label="Conversation">
-      <div id="welcome" class="welcome">Ask about your project, or type <code>/edit</code> followed by a requested change to create a reviewable proposal for the open file.</div>
+      <div id="welcome" class="welcome">Ask about your project. Type <code>/scan</code> to build or update local repository notes, or type <code>/edit</code> followed by a requested change to propose a file edit.</div>
     </section>
     <div id="status" role="status"></div>
     <form id="chat-form">
@@ -158,13 +227,43 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
     const prompt = document.getElementById('prompt');
     const sendButton = document.getElementById('send');
     const form = document.getElementById('chat-form');
+    document.getElementById('select-context').addEventListener('click', () => {
+      vscode.postMessage({ type: 'contextAction', contextAction: 'select' });
+    });
+    document.getElementById('clear-context').addEventListener('click', () => {
+      vscode.postMessage({ type: 'contextAction', contextAction: 'clear' });
+    });
 
-    function addMessage(role, text, isError = false, proposalActions = false) {
+    function addMessage(role, text, isError = false, proposalActions = false, references = [], messageIndex = -1, memoryChoice = '') {
       welcome.hidden = true;
       const article = document.createElement('article');
       article.className = 'message ' + role + (isError ? ' error' : '');
+      if (messageIndex >= 0) article.dataset.messageIndex = String(messageIndex);
       article.textContent = text;
       messages.appendChild(article);
+      if (role === 'assistant' && !isError && messageIndex >= 0) {
+        if (references.length) {
+          const details = document.createElement('details');
+          const summary = document.createElement('summary');
+          summary.textContent = 'Context sent to the model (' + references.length + ' items)';
+          const list = document.createElement('ul');
+          for (const path of references) { const item = document.createElement('li'); item.textContent = path; list.appendChild(item); }
+          details.append(summary, list);
+          article.appendChild(details);
+        }
+        const memoryControls = document.createElement('div');
+        memoryControls.className = 'controls';
+        for (const [label, action] of [['Helpful', 'helpful'], ['Not helpful', 'notHelpful'], ['Remember', 'remember']]) {
+          const button = document.createElement('button');
+          button.type = 'button'; button.textContent = label; button.disabled = memoryChoice !== '';
+          button.addEventListener('click', () => {
+            memoryControls.querySelectorAll('button').forEach((item) => item.disabled = true);
+            vscode.postMessage({ type: 'memoryAction', memoryAction: action, messageIndex });
+          });
+          memoryControls.appendChild(button);
+        }
+        article.appendChild(memoryControls);
+      }
       if (proposalActions) {
         const controls = document.createElement('div');
         controls.className = 'controls';
@@ -211,15 +310,24 @@ export class AgentChatViewProvider implements vscode.WebviewViewProvider {
       if (message.type === 'history') {
         messages.querySelectorAll('.message').forEach((item) => item.remove());
         welcome.hidden = message.messages.length > 0;
-        for (const item of message.messages) addMessage(item.role, item.content, false, item.proposalActions);
+        for (let index = 0; index < message.messages.length; index++) {
+          const item = message.messages[index];
+          addMessage(item.role, item.content, false, item.proposalActions, item.references || [], item.role === 'assistant' ? index : -1, item.memoryChoice || '');
+        }
       } else if (message.type === 'assistant') {
-        addMessage('assistant', message.text, false, message.proposalActions);
+        addMessage('assistant', message.text, false, message.proposalActions, message.references || [], message.messageIndex);
       } else if (message.type === 'error') {
         addMessage('assistant', message.text, true);
       } else if (message.type === 'busy') {
         setBusy(message.value);
       } else if (message.type === 'clearProposalActions') {
         messages.querySelectorAll('.controls').forEach((item) => item.remove());
+      } else if (message.type === 'contextUpdated') {
+        addMessage('assistant', message.text);
+      } else if (message.type === 'memoryActionDone') {
+        messages.querySelector('[data-message-index="' + message.messageIndex + '"]')?.querySelectorAll('button').forEach((button) => button.disabled = true);
+        status.textContent = message.action === 'remember' ? 'Saved in local memory for this repository.' : 'Feedback saved in local memory.';
+        setTimeout(() => { if (!sendButton.disabled) status.textContent = ''; }, 2500);
       }
     });
 
