@@ -14,6 +14,7 @@ This repository is part working prototype and part learning journal. I’m docum
 - Include a limited amount of workspace context, selected files, and generated repository notes in a request. Each assistant response shows the context items sent to the model.
 - Scan supported repository files and write a readable `JAMBAVAN_NOTES.md` plus a hidden `.jambavan/scan-index.json`. Hashes let it skip unchanged files.
 - Update notes after supported file changes and when VS Code starts. If a GitHub PR is merged, Jambavan sees those changes after they are pulled or checked out locally; it does not connect to GitHub directly.
+- Show a **Cancel** action while scanning or updating notes. Cancelling stops the current Ollama request and any queued automatic scan for that repository; summaries already completed are kept.
 - Save recent chat history and feedback in VS Code extension storage for the workspace. Mark a response **Helpful**, **Not helpful**, or **Remember** to give future relevant answers more user-specific context.
 - Propose an edit to the active file and show a diff for review. Applying a proposal changes the editor buffer; I still need to review and save it.
 
@@ -38,6 +39,8 @@ F5 is the development workflow: it opens a temporary test window. The project is
 ## What happens when I ask a question
 
 Jambavan gathers a limited set of workspace paths, project instructions, the active file excerpt, optional files I selected, repository notes, and a small amount of recent conversation. It sends that context and my question to the Ollama URL in settings. It then shows the model's response and the context items supplied with the request.
+
+When I ask for a code change in chat, Jambavan should include a concrete code example and explain where it belongs. That answer is guidance only; it does not change the file. To create a complete-file proposal and review it in a diff, type `/edit` followed by the requested change while the target file is active. I can then apply or discard the proposal. If Jambavan rejects a malformed full-file proposal, it tries to return a focused code suggestion instead; that suggestion is not applied.
 
 For a scan, Jambavan finds supported text files, skips ignored folders and likely sensitive files, checks file hashes, and asks Ollama to summarize changed files. It streams each summary and saves it to the index as it completes. The readable notes are regenerated from that index.
 

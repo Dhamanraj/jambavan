@@ -37,6 +37,7 @@ Chat messages are saved separately from repository notes. Jambavan keeps up to 4
 3. It ignores files above the current size limit and files whose names look sensitive. It also redacts several common secret formats from the excerpt sent to Ollama.
 4. It hashes file contents and skips files whose hashes have not changed.
 5. For each changed file, Ollama streams back a short summary. Jambavan saves each completed summary and its hash to `.jambavan/scan-index.json` and regenerates `JAMBAVAN_NOTES.md`.
+6. The VS Code progress notification has a **Cancel** action. Cancelling aborts the active Ollama request and prevents a queued automatic scan for that repository from immediately restarting. Summaries completed before cancellation remain saved.
 
 The notes are intended as a map into the project, not as a source of truth. Verify technical claims in the original files.
 
@@ -53,7 +54,7 @@ Chat history and saved choices are not written into the repository. Repository n
 
 ## Edit proposal path
 
-The `/edit` chat action reads the active file and bounded guidance, then asks the model for a full-file replacement. Jambavan opens that replacement in a diff view. The original file is left alone until I choose **Apply proposal**. Applying writes to the editor buffer; I review and save it.
+The `/edit` chat action reads the active file and bounded guidance, then asks Ollama for a full-file replacement using a JSON schema with an `updated_file` field. This gives the extension a predictable way to separate generated code from explanation. Before opening a diff, Jambavan rejects empty or dramatically shortened proposals and checks that some substantial original lines remain. If that check rejects a response, chat asks Ollama for a focused code suggestion instead. Suggestions are displayed for review and are never applied automatically. These checks catch obvious malformed outputs, but they cannot prove that a proposal is correct. The original file is left alone until I choose **Apply proposal**. Applying writes to the editor buffer; I review and save it. Older responses using the previous `<updated_file>` tags are still accepted.
 
 This full-file approach is currently limited to smaller files so the model can return the entire file. Jambavan does not currently run tests or commands after an edit.
 

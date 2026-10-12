@@ -158,13 +158,21 @@ export async function updateRepositoryNotes(
   folder: vscode.WorkspaceFolder,
   baseUrl: string,
   model: string,
+  cancellationToken: vscode.CancellationToken,
   onProgress: (progress: RepoNotesProgress) => void,
 ): Promise<RepoNotesResult> {
+  const throwIfCancelled = (): void => {
+    if (cancellationToken.isCancellationRequested) {
+      throw new Error("Repository scan cancelled.");
+    }
+  };
+  throwIfCancelled();
   const files = await vscode.workspace.findFiles(
     new vscode.RelativePattern(folder, "**/*"),
     "**/{.git,node_modules,dist,build,coverage,.venv,.jambavan,out,target,.next}/**",
     MAX_REPO_FILES + 1,
   );
+  throwIfCancelled();
   const candidates = files
     .map((uri) => ({ uri, path: vscode.workspace.asRelativePath(uri) }))
     .filter(({ path }) =>
@@ -188,6 +196,7 @@ export async function updateRepositoryNotes(
   const changed: Array<{ uri: vscode.Uri; path: string; content: string; sha256: string }> = [];
   let unchanged = 0;
   for (const candidate of candidates) {
+    throwIfCancelled();
     try {
       const stat = await vscode.workspace.fs.stat(candidate.uri);
       if (stat.size > MAX_FILE_BYTES) {
@@ -216,12 +225,16 @@ export async function updateRepositoryNotes(
   const toSummarize = changed.slice(0, MAX_FILES_PER_SCAN);
   await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(folder.uri, ".jambavan"));
   for (const [position, file] of toSummarize.entries()) {
+    throwIfCancelled();
     onProgress({ completed: position, total: toSummarize.length, path: file.path });
-    let response: Response;
+    let summary: string;
+    const controller = new AbortController();
+    const cancellation = cancellationToken.onCancellationRequested(() => controller.abort());
     try {
-      response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
+      const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           model,
           stream: true,
@@ -237,7 +250,27 @@ export async function updateRepositoryNotes(
           ],
         }),
       });
+      if (!response.ok) {
+        const errorText = await response.text();
+        let serverError: string | undefined;
+        try {
+          serverError = (JSON.parse(errorText) as { error?: string }).error;
+        } catch {
+          // The server can return a plain text error response.
+        }
+        throw new Error(serverError ?? `Ollama returned HTTP ${response.status} while summarizing ${file.path}`);
+      }
+      summary = await readOllamaStream(response, file.path);
+      if (!summary) {
+        throw new Error(`Ollama returned an empty note for ${file.path}.`);
+      }
     } catch (error) {
+      if (cancellationToken.isCancellationRequested) {
+        throw new Error("Repository scan cancelled.");
+      }
+      if (error instanceof Error && error.message.startsWith("Ollama ")) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const cause = error instanceof Error ? error.cause : undefined;
       const causeCode =
@@ -252,27 +285,17 @@ export async function updateRepositoryNotes(
       throw new Error(
         `Ollama ${timedOut ? "did not respond in time" : "request failed"} while summarizing ${file.path} at ${baseUrl}. ${timedOut ? "The local model may be busy; wait a moment and scan again." : "Confirm the Ollama server is available, then scan again."} Details: ${detail}`,
       );
+    } finally {
+      cancellation.dispose();
     }
-    if (!response.ok) {
-      const errorText = await response.text();
-      let serverError: string | undefined;
-      try {
-        serverError = (JSON.parse(errorText) as { error?: string }).error;
-      } catch {
-        // The server can return a plain text error response.
-      }
-      throw new Error(serverError ?? `Ollama returned HTTP ${response.status} while summarizing ${file.path}`);
-    }
-    const summary = await readOllamaStream(response, file.path);
-    if (!summary) {
-      throw new Error(`Ollama returned an empty note for ${file.path}.`);
-    }
+    throwIfCancelled();
     index[file.path] = { sha256: file.sha256, summary: summary.slice(0, MAX_NOTE_CHARS) };
     const scannedAt = new Date().toISOString();
     await vscode.workspace.fs.writeFile(indexUri, Buffer.from(JSON.stringify(index, null, 2) + "\n", "utf8"));
     await vscode.workspace.fs.writeFile(notesUri, Buffer.from(renderNotes(index, scannedAt), "utf8"));
   }
 
+  throwIfCancelled();
   const scannedAt = new Date().toISOString();
   await vscode.workspace.fs.writeFile(indexUri, Buffer.from(JSON.stringify(index, null, 2) + "\n", "utf8"));
   await vscode.workspace.fs.writeFile(notesUri, Buffer.from(renderNotes(index, scannedAt), "utf8"));
